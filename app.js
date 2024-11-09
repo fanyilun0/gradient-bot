@@ -1,4 +1,4 @@
-const { Builder, By, until, Capabilities } = require("selenium-webdriver")
+const { Builder, By, until, Capabilities, TimeoutError } = require("selenium-webdriver")
 const chrome = require("selenium-webdriver/chrome")
 const url = require("url")
 const fs = require("fs")
@@ -219,10 +219,14 @@ async function getProxyIpInfo(driver, proxyUrl) {
     console.log("-> Started! Logging in https://app.gradient.network/...")
     await driver.get("https://app.gradient.network/")
 
+    console.log("-> Waiting for login elements...")
     const emailInput = By.css('[placeholder="Enter Email"]')
     const passwordInput = By.css('[type="password"]')
     const loginButton = By.css("button")
-
+    console.log("-> Found email input:", emailInput)
+    console.log("-> Found password input:", passwordInput)
+    console.log("-> Found login button:", loginButton)
+    
     await driver.wait(until.elementLocated(emailInput), 30000)
     await driver.wait(until.elementLocated(passwordInput), 30000)
     await driver.wait(until.elementLocated(loginButton), 30000)
@@ -231,8 +235,40 @@ async function getProxyIpInfo(driver, proxyUrl) {
     await driver.findElement(passwordInput).sendKeys(PASSWORD)
     await driver.findElement(loginButton).click()
 
-    // wait until find <a href="/dashboard/setting">
-    await driver.wait(until.elementLocated(By.css('a[href="/dashboard/setting"]')), 30000)
+    // Add login verification and better error handling
+    try {
+      console.log("-> Waiting for login response...")
+      
+      // First wait for any error message
+      try {
+        const errorMessage = await driver.wait(
+          until.elementLocated(By.css('[role="alert"]')), 
+          5000
+        ).getText()
+        console.error("-> Login failed:", errorMessage)
+        throw new Error(`Login failed: ${errorMessage}`)
+      } catch (e) {
+        if (!(e instanceof TimeoutError)) {
+          throw e
+        }
+        // No error found, continue
+      }
+
+      // Then wait for either the settings link or dashboard
+      try {
+        await driver.wait(
+          until.elementLocated(By.css('a[href="/dashboard/setting"], .dashboard-container')), 
+          30000
+        )
+        console.log("-> Login successful!")
+      } catch (e) {
+        throw new Error("Login might have failed - couldn't find dashboard elements")
+      }
+    } catch (error) {
+      console.error("-> Login process failed:", error.message)
+      await generateErrorReport(driver)
+      throw error
+    }
 
     console.log("-> Logged in! Waiting for open extension...")
 
