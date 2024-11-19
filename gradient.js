@@ -225,7 +225,7 @@ async function validateBrowserSession(driver) {
     await driver.getSession();
     console.log("-> Browser started successfully!");
   } catch (error) {
-    console.error("浏览器会话创建失败:", error);
+    console.error("浏览器会话创��失败:", error);
     throw error;
   }
 }
@@ -265,15 +265,159 @@ async function handleLogin(driver) {
 
 async function loginWithCredentials(driver, selectors) {
   const { email, password, loginButton } = selectors;
-  
-  await driver.wait(until.elementLocated(By.css(email)), 30000);
-  await driver.wait(until.elementLocated(By.css(password)), 30000);
-  await driver.wait(until.elementLocated(By.css(loginButton)), 30000);
+  const MAX_RETRIES = 2;
+  const WAIT_TIMEOUT = 30000;
 
-  await driver.findElement(By.css(email)).sendKeys(USER);
-  await driver.findElement(By.css(password)).sendKeys(PASSWORD);
-  await takeScreenshot(driver, "login-input");
-  await driver.findElement(By.css(loginButton)).click();
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      console.log(`-> 尝试登录 (第 ${attempt} 次)`);
+      
+      // 1. 确保在登录页面
+      const currentUrl = await driver.getCurrentUrl();
+      if (!currentUrl.includes('gradient.network')) {
+        await driver.get('https://app.gradient.network/');
+        await driver.wait(until.elementLocated(By.css(email)), WAIT_TIMEOUT);
+      }
+
+      // 2. 清除可能的旧输入
+      const emailInput = await driver.findElement(By.css(email));
+      const passwordInput = await driver.findElement(By.css(password));
+      await emailInput.clear();
+      await passwordInput.clear();
+
+      // 3. 输入凭据
+      await emailInput.sendKeys(USER);
+      await passwordInput.sendKeys(PASSWORD);
+      
+      // 4. 截图记录输入状态
+      await takeScreenshot(driver, "login-input");
+
+      // 5. 点击登录按钮
+      const loginBtn = await driver.findElement(By.css(loginButton));
+      await driver.wait(until.elementIsEnabled(loginBtn), WAIT_TIMEOUT);
+      await loginBtn.click();
+      
+      console.log("-> 已点击登录按钮，等待响应...");
+
+      // 6. 等待登录响应
+      await driver.wait(async () => {
+        try {
+          // 检查URL变化
+          const newUrl = await driver.getCurrentUrl();
+          if (newUrl.includes('/dashboard')) {
+            console.log("-> URL已改变到dashboard");
+            return true;
+          }
+
+          // 检查是否有错误消息
+          // const errors = await driver.findElements(
+          //   By.css('.error-message, .alert-error, [role="alert"]')
+          // );
+          // if (errors.length > 0) {
+          //   const errorText = await errors[0].getText();
+          //   throw new Error(`登录错误: ${errorText}`);
+          // }
+
+          // 检查登录按钮是否消失
+          const loginButtons = await driver.findElements(By.css(loginButton));
+          if (loginButtons.length === 0) {
+            console.log("-> 登录按钮已消失");
+            return true;
+          }
+
+          // 检查加载状态
+          // const loaders = await driver.findElements(
+          //   By.css('.loading, .spinner, [role="progressbar"]')
+          // );
+          // if (loaders.length > 0) {
+          //   console.log("-> 页面正在加载中...");
+          //   return false;
+          // }
+
+          return false;
+        } catch (error) {
+          console.log("-> 状态检查出错:", error.message);
+          return false;
+        }
+      }, WAIT_TIMEOUT, "登录响应等待超时");
+
+      // 7. 额外等待确保页面加载完成
+      await new Promise(resolve => setTimeout(resolve, 5000));
+      
+      // 8. 验证登录状态
+      const isLoggedIn = await checkLoginStatus(driver);
+      if (isLoggedIn) {
+        console.log("-> 登录成功！");
+        return;
+      }
+
+    } catch (error) {
+      console.error(`-> 登录尝试 ${attempt} 失败:`, error.message);
+      await takeScreenshot(driver, `login-failure-${attempt}`);
+      
+      if (attempt === MAX_RETRIES) {
+        await generateErrorReport(driver);
+        throw new Error(`登录失败，已尝试 ${MAX_RETRIES} 次: ${error.message}`);
+      }
+      
+      // 等待后重试
+      await new Promise(resolve => setTimeout(resolve, 3000));
+    }
+  }
+}
+
+// 新增：检查登录状态的辅助函数
+async function checkLoginStatus(driver) {
+  try {
+    // 检查多个可能的登录成功标识
+    const successIndicators = [
+      // URL检查
+      async () => {
+        const url = await driver.getCurrentUrl();
+        return url.includes('/dashboard');
+      },
+      // 导航元素检查
+      // async () => {
+      //   const navElements = await driver.findElements(
+      //     By.css('nav a, .navigation, .user-profile')
+      //   );
+      //   return navElements.length > 0;
+      // },
+      // 用户信息检查
+      // async () => {
+      //   const userElements = await driver.findElements(
+      //     By.css('.user-info, .avatar, .profile-menu')
+      //   );
+      //   return userElements.length > 0;
+      // },
+      // 登录表单消失检查
+      // async () => {
+      //   const loginForm = await driver.findElements(
+      //     By.css('[type="password"]')
+      //   );
+      //   return loginForm.length === 0;
+      // }
+    ];
+
+    // 运行所有检查
+    const results = await Promise.all(
+      successIndicators.map(async (check) => {
+        try {
+          return await check();
+        } catch {
+          return false;
+        }
+      })
+    );
+
+    // 如果大多数检查通过，认为登录成功
+    const successCount = results.filter(Boolean).length;
+    return successCount >= 1; // 至少1个指标显示成功
+
+  } catch (error) {
+    console.error("-> 登录状态检查失败:", error.message);
+    return false;
+  }
 }
 
 // 扩展处理
@@ -406,7 +550,7 @@ async function validateLoginSuccess(driver, successSelectors) {
     const elements = successSelectors.map(selector =>
       driver.wait(until.elementLocated(By.css(selector)), 60000)
     )
-    console.log(elements)
+
     await Promise.any(
       elements
     );
@@ -437,9 +581,9 @@ async function handleGotItButton(driver) {
       5000
     );
     await gotItButton.click();
-    console.log("-> 点击了 'Got it' 按钮");
+    console.log("-> 点击了 'I got it' 按钮");
   } catch (error) {
-    console.log("-> 没有找到 'Got it' 按钮，继续执行...");
+    console.log("-> 没有找到 'I got it' 按钮，继续执行...");
   }
 }
 
