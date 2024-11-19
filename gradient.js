@@ -74,9 +74,9 @@ async function takeScreenshot(driver, filename) {
   if (!ALLOW_DEBUG) {
     return
   }
-
+  const timestamp = new Date().toISOString().replace(/[-:T]/g, '').replace(/\..+/, '');
   const data = await driver.takeScreenshot()
-  fs.writeFileSync(filename, Buffer.from(data, "base64"))
+  fs.writeFileSync(`${filename}-${timestamp}.png`, Buffer.from(data, "base64"))
 }
 
 async function generateErrorReport(driver) {
@@ -84,7 +84,7 @@ async function generateErrorReport(driver) {
   const dom = await driver.findElement(By.css("html")).getAttribute("outerHTML")
   fs.writeFileSync("error.html", dom)
 
-  await takeScreenshot(driver, "error.png")
+  await takeScreenshot(driver, "error")
 
   const logs = await driver.manage().logs().get("browser")
   fs.writeFileSync(
@@ -248,7 +248,6 @@ function setupHeartbeat(driver, cleanup) {
 async function handleLogin(driver) {
   console.log("-> Started! Logging in https://app.gradient.network/...");
   await driver.get("https://app.gradient.network/");
-
   const selectors = {
     email: '[placeholder="Enter Email"]',
     password: '[type="password"]',
@@ -256,7 +255,7 @@ async function handleLogin(driver) {
     successSelectors: [
       'a[href="/dashboard"]',
       'a[href="/dashboard/setting"]',
-      '.gradient-body',
+      // '.gradient-body',
     ]
   };
 
@@ -273,6 +272,7 @@ async function loginWithCredentials(driver, selectors) {
 
   await driver.findElement(By.css(email)).sendKeys(USER);
   await driver.findElement(By.css(password)).sendKeys(PASSWORD);
+  await takeScreenshot(driver, "login-input");
   await driver.findElement(By.css(loginButton)).click();
 }
 
@@ -280,7 +280,8 @@ async function loginWithCredentials(driver, selectors) {
 async function handleExtension(driver, extensionId) {
   console.log("-> Extension opened!");
   await driver.get(`chrome-extension://${extensionId}/popup.html`);
-  
+  // take screenshot
+  await takeScreenshot(driver, "extension");
   await validateExtension(driver);
   await handleGotItButton(driver);
   await checkRegionAvailability(driver);
@@ -400,12 +401,16 @@ main().catch(error => {
 async function validateLoginSuccess(driver, successSelectors) {
   console.log("-> 验证登录状态...");
   try {
+    await takeScreenshot(driver, "login-success-wait");
     // 等待任意一个成功标识元素出现
+    const elements = successSelectors.map(selector =>
+      driver.wait(until.elementLocated(By.css(selector)), 60000)
+    )
+    console.log(elements)
     await Promise.any(
-      successSelectors.map(selector =>
-        driver.wait(until.elementLocated(By.css(selector)), 30000)
-      )
+      elements
     );
+    await takeScreenshot(driver, "login-success");
     console.log("-> 登录成功!");
   } catch (error) {
     console.error("-> 登录失败:", error);
@@ -426,8 +431,9 @@ async function validateExtension(driver) {
 
 async function handleGotItButton(driver) {
   try {
+    await takeScreenshot(driver, "got-it-button");
     const gotItButton = await driver.wait(
-      until.elementLocated(By.xpath("//button[contains(text(), 'Got it')]")),
+      until.elementLocated(By.xpath("//button[contains(text(), 'I got it')]")),
       5000
     );
     await gotItButton.click();
@@ -439,10 +445,13 @@ async function handleGotItButton(driver) {
 
 async function checkRegionAvailability(driver) {
   try {
-    const regionUnavailable = await driver.findElements(
-      By.xpath("//div[contains(text(), 'Region unavailable')]")
-    );
-    if (regionUnavailable.length > 0) {
+    await takeScreenshot(driver, "region-unavailable");
+    const notAvailable = await driver.findElement(
+      By.xpath(
+        '//*[contains(text(), "Sorry, Gradient is not yet available in your region.")]'
+      )
+    )
+    if (notAvailable) {
       console.error("-> 区域不可用!");
       throw new Error("区域不可用");
     }
@@ -455,11 +464,12 @@ async function checkRegionAvailability(driver) {
 
 async function checkSupportStatus(driver) {
   try {
-    const statusElement = await driver.wait(
-      until.elementLocated(By.css(".status")),
-      30000
-    );
-    return await statusElement.getText();
+    await takeScreenshot(driver, "support-status");
+    // Helveticae text-[12px] text-theme-gray-60 select-none
+    const supportStatus = await driver
+      .findElement(By.css(".Helveticae.text-[12px].text-theme-gray-60.select-none"))
+      .getText()
+    return supportStatus
   } catch (error) {
     console.error("-> 获取支持状态失败:", error);
     throw error;
