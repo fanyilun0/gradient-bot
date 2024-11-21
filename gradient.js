@@ -165,6 +165,35 @@ async function getDriverOptions() {
     );
   }
 
+  if (PROXY) {
+    console.log("-> Setting up proxy...", PROXY)
+
+    let proxyUrl = PROXY
+
+    // if no scheme, add http://
+    if (!proxyUrl.includes("://")) {
+      proxyUrl = `http://${proxyUrl}`
+    }
+
+    const newProxyUrl = await proxyChain.anonymizeProxy(proxyUrl)
+
+    console.log("-> New proxy URL:", newProxyUrl)
+
+    options.setProxy(
+      proxy.manual({
+        http: newProxyUrl,
+        https: newProxyUrl,
+      })
+    )
+    const url = new URL(newProxyUrl)
+    console.log("-> Proxy host:", url.hostname)
+    console.log("-> Proxy port:", url.port)
+    options.addArguments(`--proxy-server=socks5://${url.hostname}:${url.port}`)
+    console.log("-> Setting up proxy done!")
+  } else {
+    console.log("-> No proxy set!")
+  }
+
   return options;
 }
 
