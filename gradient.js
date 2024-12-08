@@ -1,4 +1,5 @@
 const { Builder, By, until, Capabilities } = require("selenium-webdriver")
+const { sendWebhookMessage } = require("./webhook")
 const chrome = require("selenium-webdriver/chrome")
 const url = require("url")
 const fs = require("fs")
@@ -80,7 +81,7 @@ async function takeScreenshot(driver, filename) {
   const filenameWithSuffix = `${filename}-${suffix}`    
 
   const data = await driver.takeScreenshot()
-  fs.writeFileSync(`${USER}-${filenameWithSuffix}`, Buffer.from(data, "base64"))
+  fs.writeFileSync(`${USER}-${filenameWithSuffix}.png`, Buffer.from(data, "base64"))
 }
 
 async function generateErrorReport(driver) {
@@ -215,7 +216,12 @@ async function getProxyIpInfo(driver, proxyUrl) {
     await driver.wait(until.elementLocated(By.css("body")), 30000)
     const pageText = await driver.findElement(By.css("body")).getText()
     console.log("-> Proxy IP info:", pageText)
+
+    if (pageText) {
+      await sendWebhookMessage(`🌐 代理连接成功\nIP: ${pageText}`, USER);
+    }
   } catch (error) {
+    await sendWebhookMessage(`⚠️ 代理连接失败\n错误: ${error.message}`, USER);
     console.error("-> Failed to get proxy IP info:", error)
     throw new Error("Failed to get proxy IP info!")
   }
@@ -261,7 +267,7 @@ async function validateBrowserSession(driver) {
     await driver.getSession();
     console.log("-> Browser started successfully!");
   } catch (error) {
-    console.error("浏览器会话创��失败:", error);
+    console.error("浏览器会话创失败:", error);
     throw error;
   }
 }
@@ -365,6 +371,7 @@ async function loginWithCredentials(driver, selectors) {
       const isLoggedIn = await checkLoginStatus(driver);
       if (isLoggedIn) {
         console.log("-> 登录成功！");
+        await sendWebhookMessage(`✅ 登录成功`, USER);
         return;
       }
 
@@ -498,15 +505,19 @@ async function main() {
     const supportStatus = await handleExtension(driver, extensionId);
 
     if (supportStatus.includes("Disconnected")) {
+      await sendWebhookMessage(`⚠️ 连接断开`, USER);
       await handleDisconnectedStatus(driver);
       return;
     }
 
+    
     if (supportStatus.includes("Unsupported")) {
-      // await handleUnsupportedStatus(driver);
+      await sendWebhookMessage(`⚠️ 不支持`, USER);
       console.log("-> Unsupported! Exiting...");
-    //   return;
+      return;
     }
+
+    await sendWebhookMessage(`✅ 支持状态: ${supportStatus}`, USER);
 
     console.log("-> Connected! Starting rolling...");
     console.log({ support_status: supportStatus });
