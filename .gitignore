@@ -5,3 +5,4 @@ error.log
 *.html
 node_modules
 *.png
+*.log
