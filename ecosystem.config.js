@@ -2,7 +2,7 @@ module.exports = {
   apps: [
     {
       name: "gradient-1",
-      script: "app.js",
+      script: "gradient.js",
       env: {
         APP_USER: "user1@example.com",
         APP_PASS: "password1",
@@ -11,7 +11,7 @@ module.exports = {
     },
     {
       name: "gradient-2", 
-      script: "app.js",
+      script: "gradient.js",
       env: {
         APP_USER: "user2@example.com",
         APP_PASS: "password2",
