@@ -74,9 +74,13 @@ async function takeScreenshot(driver, filename) {
   if (!ALLOW_DEBUG) {
     return
   }
-  const timestamp = new Date().toISOString().replace(/[-:T]/g, '').replace(/\..+/, '');
+
+  // fix filename with suffix
+  const suffix = new Date().toISOString().replace(/[-:T]/g, '').substring(0, 12)
+  const filenameWithSuffix = `${filename}-${suffix}`    
+
   const data = await driver.takeScreenshot()
-  fs.writeFileSync(`${filename}-${timestamp}.png`, Buffer.from(data, "base64"))
+  fs.writeFileSync(`${USER}-${filenameWithSuffix}`, Buffer.from(data, "base64"))
 }
 
 async function generateErrorReport(driver) {
@@ -95,6 +99,9 @@ async function generateErrorReport(driver) {
 
 async function getDriverOptions() {
   const options = new chrome.Options();
+
+  // 添加 Chrome 二进制文件路径
+  options.setChromeBinaryPath('/usr/bin/chromium-browser')  // 或 '/usr/bin/chromium'
 
   // 1. 核心运行模式设置
   options.addArguments(
@@ -165,7 +172,7 @@ async function getDriverOptions() {
     );
   }
 
-  if (PROXY) {
+    if (PROXY) {
     console.log("-> Setting up proxy...", PROXY)
 
     let proxyUrl = PROXY
@@ -338,31 +345,12 @@ async function loginWithCredentials(driver, selectors) {
             return true;
           }
 
-          // 检查是否有错误消息
-          // const errors = await driver.findElements(
-          //   By.css('.error-message, .alert-error, [role="alert"]')
-          // );
-          // if (errors.length > 0) {
-          //   const errorText = await errors[0].getText();
-          //   throw new Error(`登录错误: ${errorText}`);
-          // }
-
           // 检查登录按钮是否消失
           const loginButtons = await driver.findElements(By.css(loginButton));
           if (loginButtons.length === 0) {
             console.log("-> 登录按钮已消失");
             return true;
           }
-
-          // 检查加载状态
-          // const loaders = await driver.findElements(
-          //   By.css('.loading, .spinner, [role="progressbar"]')
-          // );
-          // if (loaders.length > 0) {
-          //   console.log("-> 页面正在加载中...");
-          //   return false;
-          // }
-
           return false;
         } catch (error) {
           console.log("-> 状态检查出错:", error.message);
@@ -404,28 +392,7 @@ async function checkLoginStatus(driver) {
       async () => {
         const url = await driver.getCurrentUrl();
         return url.includes('/dashboard');
-      },
-      // 导航元素检查
-      // async () => {
-      //   const navElements = await driver.findElements(
-      //     By.css('nav a, .navigation, .user-profile')
-      //   );
-      //   return navElements.length > 0;
-      // },
-      // 用户信息检查
-      // async () => {
-      //   const userElements = await driver.findElements(
-      //     By.css('.user-info, .avatar, .profile-menu')
-      //   );
-      //   return userElements.length > 0;
-      // },
-      // 登录表单消失检查
-      // async () => {
-      //   const loginForm = await driver.findElements(
-      //     By.css('[type="password"]')
-      //   );
-      //   return loginForm.length === 0;
-      // }
+      }
     ];
 
     // 运行所有检查
@@ -457,7 +424,6 @@ async function handleExtension(driver, extensionId) {
   await takeScreenshot(driver, "extension");
   await validateExtension(driver);
   await handleGotItButton(driver);
-  await checkRegionAvailability(driver);
   
   const supportStatus = await checkSupportStatus(driver);
   return supportStatus;
@@ -534,6 +500,12 @@ async function main() {
     if (supportStatus.includes("Disconnected")) {
       await handleDisconnectedStatus(driver);
       return;
+    }
+
+    if (supportStatus.includes("Unsupported")) {
+      // await handleUnsupportedStatus(driver);
+      console.log("-> Unsupported! Exiting...");
+    //   return;
     }
 
     console.log("-> Connected! Starting rolling...");
@@ -616,31 +588,13 @@ async function handleGotItButton(driver) {
   }
 }
 
-async function checkRegionAvailability(driver) {
-  try {
-    await takeScreenshot(driver, "region-unavailable");
-    const notAvailable = await driver.findElement(
-      By.xpath(
-        '//*[contains(text(), "Sorry, Gradient is not yet available in your region.")]'
-      )
-    )
-    if (notAvailable) {
-      console.error("-> 区域不可用!");
-      throw new Error("区域不可用");
-    }
-  } catch (error) {
-    if (error.message === "区域不可用") {
-      throw error;
-    }
-  }
-}
 
 async function checkSupportStatus(driver) {
   try {
     await takeScreenshot(driver, "support-status");
     // Helveticae text-[12px] text-theme-gray-60 select-none
     const supportStatus = await driver
-      .findElement(By.css(".Helveticae.text-[12px].text-theme-gray-60.select-none"))
+      .findElement(By.css(".Helveticae.text-theme-gray-60"))
       .getText()
     return supportStatus
   } catch (error) {
