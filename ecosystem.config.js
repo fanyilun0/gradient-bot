@@ -3,6 +3,8 @@ module.exports = {
     {
       name: "gradient-1",
       script: "gradient.js",
+      instances: 1,
+      exec_mode: 'fork',
       env: {
         APP_USER: "user1@example.com",
         APP_PASS: "password1",
@@ -12,6 +14,8 @@ module.exports = {
     {
       name: "gradient-2", 
       script: "gradient.js",
+      instances: 1,
+      exec_mode: 'fork',
       env: {
         APP_USER: "user2@example.com",
         APP_PASS: "password2",
