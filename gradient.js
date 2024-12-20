@@ -9,6 +9,7 @@ const path = require("path")
 const FormData = require("form-data")
 const proxy = require("selenium-webdriver/proxy")
 const proxyChain = require("proxy-chain")
+// const { TrafficStats, setupTrafficMonitoring, setupTrafficReporting } = require('./traffic-stats');
 require('console-stamp')(console, {
   format: ':date(yyyy/mm/dd HH:MM:ss.l)'
 })
@@ -110,6 +111,7 @@ async function getDriverOptions() {
     "--disable-gpu",                 // 禁用GPU加速（在headless模式下推荐）
     "--no-sandbox",                  // 禁用沙箱模式（在Docker中必需）
     "--single-process",              // 单进程运行（可以移除，因为可能影响稳定性）
+    "--disable-dev-tools"
   );
 
   // 2. 性能优化相关
@@ -234,15 +236,6 @@ function logMemoryUsage() {
   console.log(`- 堆内存使用: ${Math.round(used.heapUsed / 1024 / 1024)} MB`);
   console.log(`- 总堆内存: ${Math.round(used.heapTotal / 1024 / 1024)} MB`);
   console.log(`- 进程总内存: ${Math.round(used.rss / 1024 / 1024)} MB`);
-  
-  // 监控 Chrome 进程
-  const exec = require('child_process').exec;
-  exec('ps -o pid,rss,command | grep chrome', (error, stdout, stderr) => {
-    if (!error) {
-      console.log('Chrome 进程内存使用:');
-      console.log(stdout);
-    }
-  });
 }
 
 // 浏览器初始化
@@ -258,6 +251,17 @@ async function initializeBrowser(options) {
     });
 
   await validateBrowserSession(driver);
+  
+  // // 添加流量统计
+  // if (PROXY) {
+  //   const stats = new TrafficStats(USER);
+  //   await stats.loadStats();
+  //   await setupTrafficMonitoring(driver, stats);
+  //   setupTrafficReporting(stats);
+  //   // 将 stats 对象附加到 driver 以便其他函数使用
+  //   driver.trafficStats = stats;
+  // }
+  
   return driver;
 }
 
@@ -277,13 +281,14 @@ function setupHeartbeat(driver, cleanup) {
   return setInterval(async () => {
     try {
       await driver.getCurrentUrl();
+      console.log("-> 心跳检测成功");
     } catch (error) {
       console.error("浏览器心跳检测失败:", error);
       clearInterval(heartbeat);
       await cleanup();
       process.exit(1);
     }
-  }, 5000);
+  }, 60000);
 }
 
 // 登录处理
@@ -427,8 +432,6 @@ async function checkLoginStatus(driver) {
 async function handleExtension(driver, extensionId) {
   console.log("-> Extension opened!");
   await driver.get(`chrome-extension://${extensionId}/popup.html`);
-  // take screenshot
-  await takeScreenshot(driver, "extension");
   await validateExtension(driver);
   await handleGotItButton(driver);
   
@@ -441,17 +444,20 @@ function setupStatusMonitoring(driver, cleanup) {
   return setInterval(() => {
     logMemoryUsage();
     monitorBrowserStatus(driver, cleanup);
-  }, 30000);
+  }, 120000);
 }
 
 async function monitorBrowserStatus(driver, cleanup) {
   try {
-    const title = await driver.getTitle();
-    console.log(`-> [${USER}] Running...`, title);
+    const supportStatus = await checkSupportStatus(driver);
+    console.log(`-> [${USER}] Running...`, supportStatus);
     
-    if (PROXY) {
-      console.log(`-> [${USER}] Running with proxy ${PROXY}...`);
-    }
+    // if (PROXY && driver.trafficStats) {
+    //   const stats = driver.trafficStats;
+    //   const formatted = stats.getFormattedStats();
+    //   console.log(`-> [${USER}] Running with proxy ${PROXY}...
+    //     当前流量: ${formatted.total}`);
+    // }
   } catch (error) {
     console.error("Error in monitoring:", error);
     await cleanup();
@@ -466,16 +472,19 @@ async function cleanup(driver, intervalId) {
       clearInterval(intervalId);
     }
 
+    // if (driver && driver.trafficStats) {
+    //   const stats = driver.trafficStats;
+    //   const formatted = stats.getFormattedStats();
+    //   console.log(`-> 最终流量统计:
+    //     接收: ${formatted.received}
+    //     发送: ${formatted.sent}
+    //     总计: ${formatted.total}
+    //     运行时长: ${formatted.duration}`);
+    //   await stats.saveStats();
+    // }
+
     if (driver) {
       await driver.quit();
-    }
-
-    if (PROXY) {
-      try {
-        await proxyChain.closeAnonymizedProxy(PROXY);
-      } catch (proxyError) {
-        console.log("-> 代理清理过程中出现错误:", proxyError.message);
-      }
     }
 
     console.log("资源清理完成");
@@ -485,6 +494,7 @@ async function cleanup(driver, intervalId) {
 }
 
 // 主函数
+let heartbeat;
 async function main() {
   let driver;
   let intervalId;
@@ -495,7 +505,7 @@ async function main() {
     options.addExtensions(path.resolve(__dirname, EXTENSION_FILENAME));
 
     driver = await initializeBrowser(options);
-    const heartbeat = setupHeartbeat(driver, () => cleanup(driver, intervalId));
+    heartbeat = setupHeartbeat(driver, () => cleanup(driver, intervalId));
 
     if (PROXY) {
       await getProxyIpInfo(driver, PROXY);
@@ -557,8 +567,6 @@ main().catch(error => {
 async function validateLoginSuccess(driver, successSelectors) {
   console.log("-> 验证登录状态...");
   try {
-    await takeScreenshot(driver, "login-success-wait");
-    // 等待任意一个成功标识元素出现
     const elements = successSelectors.map(selector =>
       driver.wait(until.elementLocated(By.css(selector)), 60000)
     )
@@ -587,7 +595,6 @@ async function validateExtension(driver) {
 
 async function handleGotItButton(driver) {
   try {
-    await takeScreenshot(driver, "got-it-button");
     const gotItButton = await driver.wait(
       until.elementLocated(By.xpath("//button[contains(text(), 'I got it')]")),
       5000
